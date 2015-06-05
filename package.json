@@ -1,0 +1,23 @@
+{
+  "name": "allex_cdnservice",
+  "version": "0.1.0",
+  "description": "CdnService",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@gitlab.hers.rs:allex_services/cdn.git"
+  },
+  "keywords": [
+    "ecosystem:allex",
+    "Service",
+    "Cdn"
+  ],
+  "author": "HERS Belgrade",
+  "license": "ISC",
+  "dependencies": {
+    "node-static": "^0.7.6"
+  }
+}
