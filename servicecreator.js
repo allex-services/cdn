@@ -1,5 +1,7 @@
 function createCdnService(execlib,ParentServicePack){
-  var ParentService = ParentServicePack.Service;
+  var ParentService = ParentServicePack.Service,
+  Suite = execlib.execSuite,
+  Taskregistry = Suite.taskRegistry;
 
   function factoryCreator(parentFactory){
     return {
@@ -17,7 +19,23 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype.onSuperSink = function (supersink, defer) {
-    console.log('SAMO DA TE VIDIM ...');
+    /*
+    console.log('SAMO DA TE VIDIM ...', arguments);
+    var taskhash = {
+      sink: supersink,
+      command:'bla'
+    };
+    Taskregistry.run ('cdn_ws_ctrl', taskhash);
+    */
+    /*
+
+    supersink.call('start').done(function ()  {
+      console.log('AAAAAAAAAAAAA', arguments);
+    }, function () {
+      console.log('bbbbbbbbbb', arguments);
+    });
+    */
+    ///defer.resolve(); ///ovo pukne ... kaze da nema defer-a ...
   };
   
   return CdnService;
