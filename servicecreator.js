@@ -32,12 +32,13 @@ function createCdnService(execlib,ParentServicePack){
     ParentService.call(this,prophash);
     this.path = prophash.path;
     var webapp_suite = prophash.webapp_suite || DEFAULT_WEBAPP_SUITE;
-    this._serverMonitorPath = Path.resolve(this.path, webapp_suite, '_monitor');
+    this._serverMonitorPath = Path.resolve(this.path, webapp_suite, prophash.repo ? '_monitor' : '_generated');
     this._phase = 0;
     this._interval = null;
 
     this.server = null;
     this.ns = null;
+    this.cwd = Path.resolve(this.path, webapp_suite);
 
     this.state.set('commit_id', null);
     this.state.set('webapp_suite', webapp_suite);
@@ -49,6 +50,7 @@ function createCdnService(execlib,ParentServicePack){
   }
   ParentService.inherit(CdnService,factoryCreator);
   CdnService.prototype.__cleanUp = function(){
+    ///!!!!! TODO: revise this one ...
     this.stop();
     if (this._interval) clearInterval(this._interval);
     this._interval = null;
@@ -65,68 +67,86 @@ function createCdnService(execlib,ParentServicePack){
       }catch (e) {
         defer.reject(e);
       }
-      Git.clone (this.state.get('repo'), this.path).done(this._onCloneDone.bind(this));
+      [
+        Git.clone.bind(Git,this.state.get('repo'), this.path, null),
+        Git.setBranch.bind(Git,this.state.get('branch'), this.path, null),
+        this._readLastCommitID.bind(this),
+        this._generatePb.bind(this),
+        this._move_generated.bind(this),
+        this._linkPhase.bind(this),
+        this._initSniffer.bind(this),
+        this.start.bind(this, this.state.get('port'), null)
+      ].reduce (this._reduction.bind(this), Q(null));
     }else{
-      this._onContainerReady();
+        [
+          this._generatePb.bind(this),
+          this._initFsSniffer.bind(this),
+          this.start.bind(this, this.state.get('port'), null)
+        ].reduce(this._reduction.bind(this) ,Q(null));
     }
   };
 
-  CdnService.prototype._onContainerReady = function () {
-    this._generatePb()
-      .then(this._initSniffer.bind(this), this._pbFaild.bind(this))
-      .done (this.start.bind(this, this.state.get('port')));
-  };
-
-  CdnService.prototype._readCommitId = function () {
-    Git.getLastCommitID(this.path)
-      .then(this._onGotCommitId.bind(this), this._onCommitIdFaild.bind(this))
-      .done(this._onContainerReady.bind(this));
-  };
   CdnService.prototype._onGotCommitId = function (s) {
     this.state.set('commit_id', s.stdout.trim());
   };
-  CdnService.prototype._onCommitIdFaild = function () {
-    console.log('Commit id failed', arguments);
+
+  CdnService.prototype._readLastCommitID = function () {
+    return Git.getLastCommitID(this.path).then(this._onGotCommitId.bind(this)); //then will return promise and we're good ...
   };
 
-  CdnService.prototype._onCloneDone = function () {
-    Git.setBranch(this.state.get('branch'), this.path).done (this._readCommitId.bind(this));
-  };
-  CdnService.prototype._pbFaild = function (err) {
-    console.log('WebApp build failed: ', err.stdout.toString());
+  CdnService.prototype._reduction = function (soFar, f) {
+    return soFar.then(f, this._onError.bind(this));
   };
 
   CdnService.prototype._initSniffer = function () {
+    var d = Q.defer();
     this._interval = setInterval (this.update.bind(this),this.state.get('sniffing_interval'));
-    console.log('CDN sniffer set to', this.state.get('sniffing_interval'));
+    this.log('CDN sniffer set to', this.state.get('sniffing_interval'));
+    d.resolve();
+    return d.promise;
+  };
+
+  CdnService.prototype._initFsSniffer = function () {
+
+
+    ///SAD CU DA VIDIM ...
+    var d = Q.defer();
+    d.resolve();
+    return d.promise;
   };
 
   CdnService.prototype._generatePb = function () {
     var ret = Q.defer();
-    var cwd = Path.resolve(this.path, this.state.get('webapp_suite'));
-    if (!Fs.dirExists (cwd)) {
-      ret.reject('Invalid path: '+cwd);
+    if (!Fs.dirExists (this.cwd)) {
+      ret.reject('Invalid path: '+this.cwd);
       return ret.promise;
     }
-    Node.executeCommand('allex-webapp-build', null, {cwd: cwd})
-      .done (this._onBuildDone.bind(this, cwd, ret), ret.reject.bind(ret));
+    var cwd = this.cwd;
+    this.log('Building allex webapp');
+    ret.promise.then(this.log_s.bind(this, 'Allex webapp build successfully'));
+    Node.executeCommand('allex-webapp-build', ret, {cwd: this.cwd});
+    return ret.promise;
+  };
+  CdnService.prototype._move_generated = function () {
+    var ret = Q.defer();
+    var td = '_monitor_'+this._phase;
+    ret.promise.done (this.log_s.bind(this, 'Moving _generated done ...'));
+    Node.executeCommand('rm -rf '+td+' && mv _generated '+td, ret , {cwd: this.cwd});
     return ret.promise;
   };
 
-  CdnService.prototype._onBuildDone = function (cwd, defer) {
-    var td = '_monitor_'+this._phase;
-    Node.executeCommand('rm -rf '+td+' && mv _generated '+td, null, {cwd: cwd})
-      .done(this._onWebAppReady.bind(this, td, defer, cwd), defer.reject.bind(defer));
+  CdnService.prototype._linkPhase = function () {
+    var defer = Q.defer();
+    var phase_dir = '_monitor_'+this._phase;
     this._phase = (this._phase+1)%2;
-  };
-
-  CdnService.prototype._onWebAppReady = function (phase_dir, defer, cwd) {
-    var _monitor_path = Path.resolve(cwd, '_monitor');
+    var _monitor_path = Path.resolve(this.cwd, '_monitor');
     if (Fs.dirExists(_monitor_path)) {
       Fs.unlinkSync(_monitor_path);
     }
-    Fs.symlinkSync(Path.resolve(cwd, phase_dir), _monitor_path);
+    Fs.symlinkSync(Path.resolve(this.cwd, phase_dir), _monitor_path);
     defer.resolve();
+    this.log('Link phase done');
+    return defer.promise;
   };
 
   CdnService.prototype.update = function () {
@@ -141,32 +161,53 @@ function createCdnService(execlib,ParentServicePack){
     this.stop(this.start.bind(this, port));
   };
 
-  CdnService.prototype.start = function (port) {
+  CdnService.prototype.start = function (port, defer) {
     //TODO: what about certificate paths and so on ....
-    //TODO
+    if (!defer) defer = Q.defer();
     if (this.ns) throw Error('Already running?');
     var proto = this.state.get('protocol');
     if (proto !== 'http' && this.proto !== 'htts') throw Error('Invalid protocol '+proto);
-    console.log('Time to start listening: ',port, proto);
+    this.log('Time to start listening: ',port, proto);
     this.ns = new StaticServer.Server(this._serverMonitorPath);
     this.server = require(proto).createServer(this._serve.bind(this));
-    this.server.on ('error', this._onServerError.bind(this));
-    this.server.listen({port:port}, this.state.set.bind(this.state, 'port', port));
+    this.server.on ('error', this._onServerError.bind(this, defer));
+    this.server.listen({port:port}, this._onListening.bind(this, port, defer));
   };
 
-  CdnService.prototype._onServerError = function () {
-    console.log('Server failed due to ',arguments);
+  CdnService.prototype._onListening = function (port,defer) {
+    this.state.set('port', port);
+    defer.resolve();
+  };
+
+  CdnService.prototype._onError = function (err) {
+    if (err instanceof Error) {
+      this.log('An error occured',err.message, err.stack);
+    }else{
+      this.log('An error occured',err);
+    }
+    this.stop();
+  };
+
+  CdnService.prototype._onServerError = function (defer,err) {
     this.state.remove('port');
+    defer.reject(err);
   };
 
   CdnService.prototype.stop = function (donecb) {
-    console.log('ABOUT TO STOP ...');
+    this.log('ABOUT TO STOP ...');
     if (this.server) {
       this.server.close(donecb);
       this.server = null;
     }
     //is this sufficient?
     this.ns = null;
+  };
+
+  CdnService.prototype.log = function () {
+    console.log.apply(console, arguments);
+  };
+  CdnService.prototype.log_s = function (s) {
+    this.log(s);
   };
   
   return CdnService;
