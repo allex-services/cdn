@@ -6,7 +6,7 @@ function createServicePack(execlib){
   return {
     Service: require('./servicecreator')(execlib,ParentServicePack),
     SinkMap: require('./sinkmapcreator')(execlib,ParentServicePack),
-    Tasks: [{name: 'cdn_ws_ctrl', klass: require('./tasks/cdn_ws_ctrl_creator')(execlib)}]
+    Tasks: [{name: 'CdnWSBuildTask', klass: require('./tasks/cdnwsbuild_creator.js')(execlib)}]
   };
 }
 

@@ -13,6 +13,10 @@ function createServiceUser(execlib,ParentUser){
   };
 
   ServiceUser.prototype.start = function (port, defer) {
+    defer.resolve();
+  };
+
+  ServiceUser.prototype.stop = function (defer) {
   };
 
   return ServiceUser;
