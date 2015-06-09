@@ -1,6 +1,11 @@
 ///TODO: think about it: how to serve multiple web app suites using root dir ...
 ///TODO: think about sniffing interval reconfiguration ...
 
+var StaticServer = require('node-static'),
+  Toolbox = require('allex-toolbox'),
+  ChildProcess = require('child_process'),
+  Watcher = require('node-watch');
+
 function createCdnService(execlib,ParentServicePack){
   var ParentService = ParentServicePack.Service,
   Path = require('path'),
@@ -8,11 +13,8 @@ function createCdnService(execlib,ParentServicePack){
   Q = lib.q,
   Suite = execlib.execSuite,
   Taskregistry = Suite.taskRegistry,
-  Toolbox = require('allex-toolbox'),
   Git = Toolbox.git,
-  ChildProcess = require('child_process'),
   Node = Toolbox.node,
-  StaticServer = require('node-static'),
   Fs = Toolbox.node.Fs;
 
   var SNIFFING_INTERVAL = 4*60*60*1000,
@@ -107,9 +109,6 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype._initFsSniffer = function () {
-
-
-    ///SAD CU DA VIDIM ...
     var d = Q.defer();
     d.resolve();
     return d.promise;
