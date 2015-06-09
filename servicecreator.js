@@ -30,6 +30,11 @@ function createCdnService(execlib,ParentServicePack){
     };
   }
 
+  function readPort (web_app_path) {
+    var data = Fs.safeReadJSONFileSync(Path.join(web_app_path, 'protoboard.json'));
+    return ('web_app' !== data.protoboard.role || !data.protoboard.port) ? null : data.protoboard.port;
+  }
+
   function CdnService(prophash){
     ParentService.call(this,prophash);
     this.path = prophash.path;
@@ -41,12 +46,12 @@ function createCdnService(execlib,ParentServicePack){
     this.server = null;
     this.ns = null;
     this.cwd = Path.resolve(this.path, webapp_suite);
-
+    var port = prophash.port ? prophash.port : (prophash.repo ? DEFAULT_EXTERNAL_PORT : readPort(Path.join(this.path, webapp_suite)) || DEFAULT_EXTERNAL_PORT);
     this.state.set('commit_id', null);
     this.state.set('webapp_suite', webapp_suite);
     this.state.set('repo', prophash.repo);
     this.state.set('sniffing_interval',prophash.sniffing_interval || SNIFFING_INTERVAL);
-    this.state.set('port', prophash.port || DEFAULT_EXTERNAL_PORT);
+    this.state.set('port', port);
     this.state.set('protocol', prophash.protocol || DEFAULT_PROTOCOL);
     this.state.set('branch', prophash.branch || DEFAULT_BRANCH);
   }
