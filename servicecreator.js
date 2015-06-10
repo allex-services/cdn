@@ -45,6 +45,7 @@ function createCdnService(execlib,ParentServicePack){
 
     this.server = null;
     this.ns = null;
+    this.module_names = [];
     this.cwd = Path.resolve(this.path, webapp_suite);
     var port = prophash.port ? prophash.port : (prophash.repo ? DEFAULT_EXTERNAL_PORT : readPort(Path.join(this.path, webapp_suite)) || DEFAULT_EXTERNAL_PORT);
     this.state.set('commit_id', null);
@@ -58,6 +59,8 @@ function createCdnService(execlib,ParentServicePack){
   ParentService.inherit(CdnService,factoryCreator);
   CdnService.prototype.__cleanUp = function(){
     ///!!!!! TODO: revise this one ...
+    lib.arryNullAll (this.module_names);
+    this.module_names = null;
     this.stop();
     if (this._interval) clearInterval(this._interval);
     this._interval = null;
@@ -91,6 +94,36 @@ function createCdnService(execlib,ParentServicePack){
           this.start.bind(this, this.state.get('port'), null)
         ].reduce(this._reduction.bind(this) ,Q(null));
     }
+    Taskregistry.run('findSink', {'masterpid':process.env.ALLEX_MACHINEMANAGERPID,'sinkname': 'LanManager', 'identity': {'name': 'user', 'role':'user'}, 'onSink': this._onLMSink.bind(this)});
+  };
+
+  CdnService.prototype._onLMSink = function (lmsink) {
+    if (!lmsink) return;
+    var state = Taskregistry.run('materializeState', {'sink': lmsink});
+    Taskregistry.run ('acquireSubSinks', {
+      'state': state, 
+      'subinits': [
+        {'name':'engaged_modules','identity': {'name':'user', 'role':'user'},'cb': this._onEngagedModulesSink.bind(this)}
+      ],
+    });
+  };
+
+  CdnService.prototype._onEngagedModulesSink = function (sink) {
+    if (!sink) return;
+    Taskregistry.run('materializeData', {
+      'sink':sink, 
+      'data': this.module_names,
+      'onInitiated':this._onLMModulesReady.bind(this),
+      'onNewRecord':this._onLMModulesRecord.bind(this),
+    });
+  };
+
+  CdnService.prototype._onLMModulesReady = function () {
+    console.log('!!!!=====>', this.module_names);
+  };
+
+  CdnService.prototype._onLMModulesRecord = function (record) {
+    console.log('====================>>> new module ',record);
   };
 
   CdnService.prototype._onGotCommitId = function (s) {
