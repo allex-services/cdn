@@ -15,10 +15,19 @@
     "Service",
     "Cdn"
   ],
-  "author": "HERS Belgrade",
+  "author": {
+    "name": "HERS Belgrade"
+  },
   "license": "ISC",
   "dependencies": {
     "node-static": "^0.7.6",
     "node-watch": "^0.3.4"
-  }
+  },
+  "gitHead": "3e7aca05c78bcf69f1f6dac38448c946b6aaeb46",
+  "readme": "# CdnService\n",
+  "readmeFilename": "README.md",
+  "_id": "allex_cdnservice@0.1.0",
+  "_shasum": "e9b29ca8558cbe0b6da49d1ebd5b8057bb0d0319",
+  "_from": "git+ssh://git@gitlab.hers.rs:allex_services/cdn",
+  "_resolved": "git+ssh://git@gitlab.hers.rs/allex_services/cdn#3e7aca05c78bcf69f1f6dac38448c946b6aaeb46"
 }

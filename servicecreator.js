@@ -4,24 +4,29 @@
 var StaticServer = require('node-static'),
   Toolbox = require('allex-toolbox'),
   ChildProcess = require('child_process'),
-  Watcher = require('node-watch');
+  Webalizer = Toolbox.webalizer,
+  Node = Toolbox.node,
+  Watcher = require('node-watch'),
+  ModuleCache = require('allex_module_cache')
+  Path = require('path');
 
 function createCdnService(execlib,ParentServicePack){
   var ParentService = ParentServicePack.Service,
-  Path = require('path'),
   lib = execlib.lib
   Q = lib.q,
   Suite = execlib.execSuite,
   Taskregistry = Suite.taskRegistry,
   Git = Toolbox.git,
-  Node = Toolbox.node,
   Fs = Toolbox.node.Fs;
+
+  //Suite.registry.register('allex_module_cache');
 
   var SNIFFING_INTERVAL = 4*60*60*1000,
     DEFAULT_WEBAPP_SUITE = 'web_app',
     DEFAULT_EXTERNAL_PORT = 80,
     DEFAULT_BRANCH = 'master',
-    DEFAULT_PROTOCOL = 'http';
+    DEFAULT_PROTOCOL = 'http',
+    DEFAULT_WEB_COMPONENT_DIR = 'web_component';
 
   function factoryCreator(parentFactory){
     return {
@@ -46,8 +51,10 @@ function createCdnService(execlib,ParentServicePack){
     this.server = null;
     this.ns = null;
     this.module_names = [];
+    this.modules = {};
     this.cwd = Path.resolve(this.path, webapp_suite);
     var port = prophash.port ? prophash.port : (prophash.repo ? DEFAULT_EXTERNAL_PORT : readPort(Path.join(this.path, webapp_suite)) || DEFAULT_EXTERNAL_PORT);
+    this.state.set('missing', prophash.waitforcomponents || null);
     this.state.set('commit_id', null);
     this.state.set('webapp_suite', webapp_suite);
     this.state.set('repo', prophash.repo);
@@ -60,6 +67,7 @@ function createCdnService(execlib,ParentServicePack){
   CdnService.prototype.__cleanUp = function(){
     ///!!!!! TODO: revise this one ...
     lib.arryNullAll (this.module_names);
+    lib.objNullAll(this.modules);
     this.module_names = null;
     this.stop();
     if (this._interval) clearInterval(this._interval);
@@ -71,6 +79,13 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype.onSuperSink = function (supersink) {
+    Taskregistry.run('findSink', {'masterpid':process.env.ALLEX_MACHINEMANAGERPID,'sinkname': 'LanManager', 'identity': {'name': 'user', 'role':'user'}, 'onSink': this._onLMSink.bind(this)});
+    if (!this.state.get('missing')) {
+      this._goForPb();
+    }
+  };
+
+  CdnService.prototype._goForPb = function () {
     if (this.state.get('repo')) {
       try {
         Fs.recreateDir(this.path);
@@ -94,7 +109,6 @@ function createCdnService(execlib,ParentServicePack){
           this.start.bind(this, this.state.get('port'), null)
         ].reduce(this._reduction.bind(this) ,Q(null));
     }
-    Taskregistry.run('findSink', {'masterpid':process.env.ALLEX_MACHINEMANAGERPID,'sinkname': 'LanManager', 'identity': {'name': 'user', 'role':'user'}, 'onSink': this._onLMSink.bind(this)});
   };
 
   CdnService.prototype._onLMSink = function (lmsink) {
@@ -118,12 +132,77 @@ function createCdnService(execlib,ParentServicePack){
     });
   };
 
+  CdnService.prototype._resolveModule = function (item) {
+    console.log('===> resolving module', item);
+    try {
+    if (!item || !item.modulename) return;
+    var name, data = {};
+
+    if (Path.isAbsolute(item.modulename)) {
+      name = Path.resolve(item.modulename).split(Path.sep).pop();
+      if (this.modules[name]){
+        ///TODO: neka provera nesto?
+        return;
+      }
+      data.path = item.modulename;
+    }else{
+      var r = ModuleCache.recognizeAllex(item.modulename);
+      if (!r) {
+        name = item.modulename;
+        data.path = Path.dirname(require.resolve(item.modulename));
+      }else{
+        name = r.servicename;
+        data.path = Path.dirname(require.resolve(item.modulename));
+      }
+    }
+
+    var web_c = Path.resolve(data.path, DEFAULT_WEB_COMPONENT_DIR);
+    if (Fs.dirExists(web_c)) {
+      data.web_component = web_c;
+    }
+    this.modules[name] = data;
+    if (data.web_component) {
+      data.promise = Node.executeCommand('allex-component-build', null, {cwd: data.path}, true);
+      data.promise.done (this._removeMissingComponent.bind(this, name, true), this._onError.bind(this));
+    }else{
+      this._removeMissingComponent(name, false);
+    }
+
+    }catch (e) {
+      console.log('================================>>', e.message, e.stack);
+    }
+  };
+
+  CdnService.prototype._removeMissingComponent = function (name, installed) {
+    var missing = this.state.get('missing');
+    if (!missing) return;
+    missing = missing.split(',');
+    var index = missing.indexOf(name);
+    if (index < 0) return;
+    if (!installed) {
+      return;
+      ///STA SAD? ovo nikad nece dobiti web componentu, a trazeno je ... ubiti skota ...
+    }
+    missing.splice(index, 1);
+    if (missing.length) {
+      this.state.set('missing', missing.join(','));
+    }else{
+      console.log('SAD BIH VEC MOGAO DA POTERAM SVE OVO ....');
+      this.state.set('missing', null);
+    }
+  };
+
+  CdnService.prototype._resolveModules = function () {
+    this.module_names.forEach (this._resolveModule.bind(this));
+  };
+
   CdnService.prototype._onLMModulesReady = function () {
-    console.log('!!!!=====>', this.module_names);
+    this._resolveModules();
   };
 
   CdnService.prototype._onLMModulesRecord = function (record) {
-    console.log('====================>>> new module ',record);
+    this.module_names.push(record);
+    this._resolveModules();
   };
 
   CdnService.prototype._onGotCommitId = function (s) {
@@ -153,6 +232,7 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype._generatePb = function () {
+
     var ret = Q.defer();
     if (!Fs.dirExists (this.cwd)) {
       ret.reject('Invalid path: '+this.cwd);
@@ -162,6 +242,7 @@ function createCdnService(execlib,ParentServicePack){
     this.log('Building allex webapp');
     ret.promise.then(this.log_s.bind(this, 'Allex webapp build successfully'));
     Node.executeCommand('allex-webapp-build', ret, {cwd: this.cwd});
+    ret.promise.done(null, this._pbFaild.bind(this));
     return ret.promise;
   };
   CdnService.prototype._move_generated = function () {
@@ -170,6 +251,16 @@ function createCdnService(execlib,ParentServicePack){
     ret.promise.done (this.log_s.bind(this, 'Moving _generated done ...'));
     Node.executeCommand('rm -rf '+td+' && mv _generated '+td, ret , {cwd: this.cwd});
     return ret.promise;
+  };
+
+  CdnService.prototype._pbFaild = function () {
+    try {
+      var missing = Webalizer.tools.getMissingComponents(this.cwd);
+      this.state.set('missing', missing.join(','));
+    }catch (e) {
+      Node.error('Fatal error, unable to move on: ', e.message, e.stack);
+      //TODO: e, a sta sad tacno???
+    }
   };
 
   CdnService.prototype._linkPhase = function () {

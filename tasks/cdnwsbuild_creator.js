@@ -27,8 +27,10 @@ module.exports = function (execlib) {
     if (this.repo) {
     }
     try {
+      console.log('DA LI SE OVO DOGODILO?');
       ChildProcess.execSync('allex-webapp-build', {cwd: this.path});
     }catch (e) {
+      console.log('NE MOZE DALJEEEEEEEEEEEEEEEEEEEEEEEEEE ...');
       ///sta sad?
     }
   };
