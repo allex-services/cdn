@@ -11,6 +11,7 @@ var StaticServer = require('node-static'),
   Path = require('path');
 
 function createCdnService(execlib,ParentServicePack){
+  try {
   var ParentService = ParentServicePack.Service,
   lib = execlib.lib
   Q = lib.q,
@@ -23,7 +24,7 @@ function createCdnService(execlib,ParentServicePack){
 
   var SNIFFING_INTERVAL = 4*60*60*1000,
     DEFAULT_WEBAPP_SUITE = 'web_app',
-    DEFAULT_EXTERNAL_PORT = 80,
+    DEFAULT_EXTERNAL_PORT = 9000,
     DEFAULT_BRANCH = 'master',
     DEFAULT_PROTOCOL = 'http',
     DEFAULT_WEB_COMPONENT_DIR = 'web_component';
@@ -37,10 +38,12 @@ function createCdnService(execlib,ParentServicePack){
 
   function readPort (web_app_path) {
     var data = Fs.safeReadJSONFileSync(Path.join(web_app_path, 'protoboard.json'));
-    return ('web_app' !== data.protoboard.role || !data.protoboard.port) ? null : data.protoboard.port;
+    return (data && ('web_app' !== data.protoboard.role || !data.protoboard.port)) ? null : data.protoboard.port;
   }
+  console.log('BEEEEEEEEEEEEEEEEEEEEEEEEEE');
 
   function CdnService(prophash){
+    console.log('STAAAAAAAAAAAAAAAAAAAA SE DESAVA?');
     ParentService.call(this,prophash);
     this.path = prophash.path;
     var webapp_suite = prophash.webapp_suite || DEFAULT_WEBAPP_SUITE;
@@ -54,6 +57,7 @@ function createCdnService(execlib,ParentServicePack){
     this.modules = {};
     this.cwd = Path.resolve(this.path, webapp_suite);
     var port = prophash.port ? prophash.port : (prophash.repo ? DEFAULT_EXTERNAL_PORT : readPort(Path.join(this.path, webapp_suite)) || DEFAULT_EXTERNAL_PORT);
+
     this.state.set('missing', prophash.waitforcomponents || null);
     this.state.set('commit_id', null);
     this.state.set('webapp_suite', webapp_suite);
@@ -62,6 +66,9 @@ function createCdnService(execlib,ParentServicePack){
     this.state.set('port', port);
     this.state.set('protocol', prophash.protocol || DEFAULT_PROTOCOL);
     this.state.set('branch', prophash.branch || DEFAULT_BRANCH);
+
+    this.state.set('cache', isNaN(prophash.cache) ? 3600 : parseInt(prophash.cache));
+    ///what is cache interval is changed?
   }
   ParentService.inherit(CdnService,factoryCreator);
   CdnService.prototype.__cleanUp = function(){
@@ -79,7 +86,7 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype.onSuperSink = function (supersink) {
-    Taskregistry.run('findSink', {'masterpid':process.env.ALLEX_MACHINEMANAGERPID,'sinkname': 'LanManager', 'identity': {'name': 'user', 'role':'user'}, 'onSink': this._onLMSink.bind(this)});
+    Taskregistry.run('findSink', {'masterpid':global.ALLEX_PROCESS_DESCRIPTOR.get('masterpid'),'sinkname': 'LanManager', 'identity': {'name': 'user', 'role':'user'}, 'onSink': this._onLMSink.bind(this)});
     if (!this.state.get('missing')) {
       this._goForPb();
     }
@@ -133,8 +140,6 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype._resolveModule = function (item) {
-    console.log('===> resolving module', item);
-    try {
     if (!item || !item.modulename) return;
     var name, data = {};
 
@@ -162,18 +167,15 @@ function createCdnService(execlib,ParentServicePack){
     }
     this.modules[name] = data;
     if (data.web_component) {
-      data.promise = Node.executeCommand('allex-component-build', null, {cwd: data.path}, true);
+      data.promise = Node.executeCommand('allex-component-build', null, {cwd: web_c}, true);
       data.promise.done (this._removeMissingComponent.bind(this, name, true), this._onError.bind(this));
     }else{
       this._removeMissingComponent(name, false);
     }
-
-    }catch (e) {
-      console.log('================================>>', e.message, e.stack);
-    }
   };
 
   CdnService.prototype._removeMissingComponent = function (name, installed) {
+    console.log('_removeMissingComponent', name, installed);
     var missing = this.state.get('missing');
     if (!missing) return;
     missing = missing.split(',');
@@ -187,8 +189,8 @@ function createCdnService(execlib,ParentServicePack){
     if (missing.length) {
       this.state.set('missing', missing.join(','));
     }else{
-      console.log('SAD BIH VEC MOGAO DA POTERAM SVE OVO ....');
       this.state.set('missing', null);
+      this._goForPb();
     }
   };
 
@@ -257,6 +259,7 @@ function createCdnService(execlib,ParentServicePack){
     try {
       var missing = Webalizer.tools.getMissingComponents(this.cwd);
       this.state.set('missing', missing.join(','));
+      Node.error('Missing components '+this.state.get('missing')+'. Will wait for them ...');
     }catch (e) {
       Node.error('Fatal error, unable to move on: ', e.message, e.stack);
       //TODO: e, a sta sad tacno???
@@ -295,8 +298,8 @@ function createCdnService(execlib,ParentServicePack){
     if (this.ns) throw Error('Already running?');
     var proto = this.state.get('protocol');
     if (proto !== 'http' && this.proto !== 'htts') throw Error('Invalid protocol '+proto);
-    this.log('Time to start listening: ',port, proto);
-    this.ns = new StaticServer.Server(this._serverMonitorPath);
+    this.log('Time to start listening: ',port, proto, 'caching interval:', this.state.get('cache'));
+    this.ns = new StaticServer.Server(this._serverMonitorPath, {cache:this.state.get('cache')});
     this.server = require(proto).createServer(this._serve.bind(this));
     this.server.on ('error', this._onServerError.bind(this, defer));
     this.server.listen({port:port}, this._onListening.bind(this, port, defer));
@@ -317,12 +320,12 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype._onServerError = function (defer,err) {
+    Node.error('A server error occured: ', err);
     this.state.remove('port');
     defer.reject(err);
   };
 
   CdnService.prototype.stop = function (donecb) {
-    this.log('ABOUT TO STOP ...');
     if (this.server) {
       this.server.close(donecb);
       this.server = null;
@@ -339,6 +342,9 @@ function createCdnService(execlib,ParentServicePack){
   };
   
   return CdnService;
+  }catch (e) {
+    console.log('FAAAAAAAAAAAAAAAAAAAAAIL ', e.message, e.stack);
+  }
 }
 
 module.exports = createCdnService;
