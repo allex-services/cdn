@@ -38,12 +38,11 @@ function createCdnService(execlib,ParentServicePack){
 
   function readPort (web_app_path) {
     var data = Fs.safeReadJSONFileSync(Path.join(web_app_path, 'protoboard.json'));
-    return (data && ('web_app' !== data.protoboard.role || !data.protoboard.port)) ? null : data.protoboard.port;
+    return (data && 'web_app' === data.protoboard.role && data.protoboard.port) ?  data.protoboard.port : null;
   }
   console.log('BEEEEEEEEEEEEEEEEEEEEEEEEEE');
 
   function CdnService(prophash){
-    console.log('STAAAAAAAAAAAAAAAAAAAA SE DESAVA?');
     ParentService.call(this,prophash);
     this.path = prophash.path;
     var webapp_suite = prophash.webapp_suite || DEFAULT_WEBAPP_SUITE;
