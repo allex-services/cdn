@@ -7,11 +7,10 @@ var StaticServer = require('node-static'),
   Webalizer = Toolbox.webalizer,
   Node = Toolbox.node,
   Watcher = require('node-watch'),
-  ModuleCache = require('allex_module_cache')
+  ModuleCache = require('allex_module_cache'),
   Path = require('path');
 
 function createCdnService(execlib,ParentServicePack){
-  try {
   var ParentService = ParentServicePack.Service,
   lib = execlib.lib
   Q = lib.q,
@@ -20,13 +19,7 @@ function createCdnService(execlib,ParentServicePack){
   Git = Toolbox.git,
   Fs = Toolbox.node.Fs;
 
-  //Suite.registry.register('allex_module_cache');
-
-  var SNIFFING_INTERVAL = 4*60*60*1000,
-    DEFAULT_WEBAPP_SUITE = 'web_app',
-    DEFAULT_EXTERNAL_PORT = 9000,
-    DEFAULT_BRANCH = 'master',
-    DEFAULT_PROTOCOL = 'http',
+  var DEFAULT_BRANCH = 'master',
     DEFAULT_WEB_COMPONENT_DIR = 'web_component';
 
   function factoryCreator(parentFactory){
@@ -35,52 +28,35 @@ function createCdnService(execlib,ParentServicePack){
       'user': require('./users/usercreator')(execlib,parentFactory.get('user')) 
     };
   }
-
-  function readPort (web_app_path) {
-    var data = Fs.safeReadJSONFileSync(Path.join(web_app_path, 'protoboard.json'));
-    return (data && 'web_app' === data.protoboard.role && data.protoboard.port) ?  data.protoboard.port : null;
-  }
-  console.log('BEEEEEEEEEEEEEEEEEEEEEEEEEE');
-
+ 
   function CdnService(prophash){
+    ///TODO: nemas bas jasne kriterijume kad dolazis na /index.html kad na /some_app/index.html
     ParentService.call(this,prophash);
-    this.path = prophash.path;
-    var webapp_suite = prophash.webapp_suite || DEFAULT_WEBAPP_SUITE;
-    this._serverMonitorPath = Path.resolve(this.path, webapp_suite, prophash.repo ? '_monitor' : '_generated');
-    this._phase = 0;
-    this._interval = null;
-
-    this.server = null;
-    this.ns = null;
-    this.module_names = [];
-    this.modules = {};
-    this.cwd = Path.resolve(this.path, webapp_suite);
-    var port = prophash.port ? prophash.port : (prophash.repo ? DEFAULT_EXTERNAL_PORT : readPort(Path.join(this.path, webapp_suite)) || DEFAULT_EXTERNAL_PORT);
+    this.path = Path.resolve(prophash.path);
+    this.commanded_web_app_suite = prophash.webapp_suite || null;
 
     this.state.set('missing', prophash.waitforcomponents || null);
-    this.state.set('commit_id', null);
-    this.state.set('webapp_suite', webapp_suite);
-    this.state.set('repo', prophash.repo);
-    this.state.set('sniffing_interval',prophash.sniffing_interval || SNIFFING_INTERVAL);
-    this.state.set('port', port);
-    this.state.set('protocol', prophash.protocol || DEFAULT_PROTOCOL);
+    this.state.set('repo', prophash.repo || null);
     this.state.set('branch', prophash.branch || DEFAULT_BRANCH);
+    this.state.set('root', null);
 
-    this.state.set('cache', isNaN(prophash.cache) ? 3600 : parseInt(prophash.cache));
-    ///what is cache interval is changed?
+    this._phase = 0;
+    this._building = false;
+    this._rebuild = false;
+
+    this.module_names = [];
+    this.modules = {};
   }
   ParentService.inherit(CdnService,factoryCreator);
   CdnService.prototype.__cleanUp = function(){
-    ///!!!!! TODO: revise this one ...
+    this._building = null;
+    this._rebuild = null;
+    if (this.commanded_web_app_suite) lib.arryNullAll(this.commanded_web_app_suite);
+    this.commanded_web_app_suite = null;
     lib.arryNullAll (this.module_names);
     lib.objNullAll(this.modules);
     this.module_names = null;
-    this.stop();
-    if (this._interval) clearInterval(this._interval);
-    this._interval = null;
     this.path = null;
-    this._phase = null;
-    this._serverMonitorPath = null;
     ParentService.prototype.__cleanUp.call(this);
   };
 
@@ -92,34 +68,39 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype._goForPb = function () {
+    if (this._building) {
+      console.log('ALREADY IN BUILD PROCESS ...');
+      return;
+    }
+    this._building = true;
     if (this.state.get('repo')) {
-      try {
-        Fs.recreateDir(this.path);
-      }catch (e) {
-        defer.reject(e);
-      }
+      console.log('going for Pb ... Removing ',this.path);
+      Fs.removeSync(this.path);
+
       [
         Git.clone.bind(Git,this.state.get('repo'), this.path, null),
         Git.setBranch.bind(Git,this.state.get('branch'), this.path, null),
         this._readLastCommitID.bind(this),
         this._generatePb.bind(this),
-        this._move_generated.bind(this),
-        this._linkPhase.bind(this),
-        this._initSniffer.bind(this),
-        this.start.bind(this, this.state.get('port'), null)
+        this._finished.bind(this)
       ].reduce (this._reduction.bind(this), Q(null));
     }else{
         [
           this._generatePb.bind(this),
-          this._initFsSniffer.bind(this),
-          this.start.bind(this, this.state.get('port'), null)
+          this._finished.bind(this)
         ].reduce(this._reduction.bind(this) ,Q(null));
     }
   };
 
+  CdnService.prototype._reduction = function (soFar, f, index) {
+    return soFar.then(f, this._onError.bind(this));
+  };
+
+
   CdnService.prototype._onLMSink = function (lmsink) {
     if (!lmsink) return;
     var state = Taskregistry.run('materializeState', {'sink': lmsink});
+    console.log('acquireSubSinks to engaged_modules ...');
     Taskregistry.run ('acquireSubSinks', {
       'state': state, 
       'subinits': [
@@ -138,7 +119,23 @@ function createCdnService(execlib,ParentServicePack){
     });
   };
 
+  CdnService.prototype._resolveModules = function () {
+    this.module_names.forEach (this._resolveModule.bind(this));
+  };
+
+  CdnService.prototype._onLMModulesReady = function () {
+    ///data will be put into this.module_names ...
+    this._resolveModules();
+  };
+
+  CdnService.prototype._onLMModulesRecord = function (record) {
+    this.module_names.push(record);
+    this._resolveModules();
+  };
+
   CdnService.prototype._resolveModule = function (item) {
+    ///seems good to me ...
+    ///find a module and execute allex-component-build ... once done, call _removeMissingComponent
     if (!item || !item.modulename) return;
     var name, data = {};
 
@@ -174,14 +171,16 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype._removeMissingComponent = function (name, installed) {
+    //seems fine to me ...
     console.log('_removeMissingComponent', name, installed);
     var missing = this.state.get('missing');
     if (!missing) return;
+
     missing = missing.split(',');
     var index = missing.indexOf(name);
     if (index < 0) return;
     if (!installed) {
-      return;
+      throw new Error("Seems to me we're having some problems, "+name+" was required, but not installed?");
       ///STA SAD? ovo nikad nece dobiti web componentu, a trazeno je ... ubiti skota ...
     }
     missing.splice(index, 1);
@@ -193,68 +192,92 @@ function createCdnService(execlib,ParentServicePack){
     }
   };
 
-  CdnService.prototype._resolveModules = function () {
-    this.module_names.forEach (this._resolveModule.bind(this));
-  };
-
-  CdnService.prototype._onLMModulesReady = function () {
-    this._resolveModules();
-  };
-
-  CdnService.prototype._onLMModulesRecord = function (record) {
-    this.module_names.push(record);
-    this._resolveModules();
-  };
-
-  CdnService.prototype._onGotCommitId = function (s) {
-    this.state.set('commit_id', s.stdout.trim());
-  };
-
   CdnService.prototype._readLastCommitID = function () {
-    return Git.getLastCommitID(this.path).then(this._onGotCommitId.bind(this)); //then will return promise and we're good ...
-  };
-
-  CdnService.prototype._reduction = function (soFar, f) {
-    return soFar.then(f, this._onError.bind(this));
-  };
-
-  CdnService.prototype._initSniffer = function () {
     var d = Q.defer();
-    this._interval = setInterval (this.update.bind(this),this.state.get('sniffing_interval'));
-    this.log('CDN sniffer set to', this.state.get('sniffing_interval'));
+    this.state.set('commit_id', Git.getLastCommitID(this.path));
+    console.log('Got last commit id',this.state.set('commit_id'))
     d.resolve();
     return d.promise;
   };
 
-  CdnService.prototype._initFsSniffer = function () {
+  CdnService.prototype._build = function (appname) {
     var d = Q.defer();
-    d.resolve();
+
+    var app_path = Path.join(this.path, appname);
+    var phase_path = Path.join(app_path, '_phase_'+this._phase);
+    d.promise.then(this.log_s.bind(this, 'Allex webapp '+app_path+' built successfully'), this._pbFaild.bind(this, app_path, appname));
+
+    var is_repo = this.state.get('repo');
+    var command = is_repo ? 
+      'rm -rf '+phase_path+' && allex-webapp-build && mv _generated '+phase_path+' && ln -fs '+phase_path+' _monitor':
+      'allex-webapp-build';
+
+    this.apps[appname] = {
+      generated: Path.resolve(app_path, is_repo ? '_monitor' : '_generated'),
+    };
+
+    Node.executeCommand(command, d, {cwd: app_path});
     return d.promise;
   };
 
   CdnService.prototype._generatePb = function () {
+    var defer = Q.defer();
+    lib.objNullAll(this.apps);
+    this.apps = {};
+    if (Toolbox.protoboard.webapp.isWebapp(this.path)) {
+      this._build('./').done(this._onBuildDone.bind(this, defer));
+    }else{
+      var was = this.commanded_web_app_suite;
 
-    var ret = Q.defer();
-    if (!Fs.dirExists (this.cwd)) {
-      ret.reject('Invalid path: '+this.cwd);
-      return ret.promise;
+      if (!was) {
+        was = Toolbox.protoboard.webapp.find(this.path);
+      }else{
+        was = was.split(',');
+      }
+
+      Q.allSettled(was.map(this._build.bind(this))).done(this._onBuildDone.bind(this, defer));
     }
-    var cwd = this.cwd;
-    this.log('Building allex webapp');
-    ret.promise.then(this.log_s.bind(this, 'Allex webapp build successfully'));
-    Node.executeCommand('allex-webapp-build', ret, {cwd: this.cwd});
-    ret.promise.done(null, this._pbFaild.bind(this));
-    return ret.promise;
-  };
-  CdnService.prototype._move_generated = function () {
-    var ret = Q.defer();
-    var td = '_monitor_'+this._phase;
-    ret.promise.done (this.log_s.bind(this, 'Moving _generated done ...'));
-    Node.executeCommand('rm -rf '+td+' && mv _generated '+td, ret , {cwd: this.cwd});
-    return ret.promise;
+    this._phase = (this._phase+1)%2;
+    return defer.promise;
   };
 
-  CdnService.prototype._pbFaild = function () {
+  CdnService.prototype._finished = function () {
+    var d = Q.defer();
+    d.resolve();
+    this._building = false;
+    if (this._rebuild) {
+      this._rebuild = false;
+    }
+    console.log('Webapps done ... ');
+    var result_path = this.state.get('repo') ? '_monitor': '_generated';
+    var apps = Object.keys(this.apps);
+
+
+    if (apps.length === 1 && this.commanded_web_app_suite) {
+      var a = apps[0];
+      this.state.set('root', Path.resolve(this.path, apps[0], result_path));
+    }else{
+      Fs.recreateDir(Path.join(this.path,'_apps'));
+      lib.traverse(this.apps, createAppLinks.bind(null, this.path));
+      this.state.set('root', Path.resolve(this.path, '_apps'));
+    }
+    console.log('Webapp CDN root is ',this.state.get('root'));
+    return d.promise;
+  };
+
+  function createAppLinks (root, value, name) {
+    Fs.symlinkSync(value.generated, Path.join(root,'_apps', name));
+  }
+
+  CdnService.prototype._onBuildDone = function (defer,results) {
+    //TODO: do some console.log regarding results ...
+    defer.resolve();
+  };
+
+  CdnService.prototype._pbFaild = function (app_path, appname) {
+    //TODO
+    console.log('FAAAAAAAAAAAAAAAAAAAAAAIL ...', arguments)
+    /*
     try {
       var missing = Webalizer.tools.getMissingComponents(this.cwd);
       this.state.set('missing', missing.join(','));
@@ -263,74 +286,12 @@ function createCdnService(execlib,ParentServicePack){
       Node.error('Fatal error, unable to move on: ', e.message, e.stack);
       //TODO: e, a sta sad tacno???
     }
+    */
   };
 
-  CdnService.prototype._linkPhase = function () {
-    var defer = Q.defer();
-    var phase_dir = '_monitor_'+this._phase;
-    this._phase = (this._phase+1)%2;
-    var _monitor_path = Path.resolve(this.cwd, '_monitor');
-    if (Fs.dirExists(_monitor_path)) {
-      Fs.unlinkSync(_monitor_path);
-    }
-    Fs.symlinkSync(Path.resolve(this.cwd, phase_dir), _monitor_path);
-    defer.resolve();
-    this.log('Link phase done');
-    return defer.promise;
-  };
-
-  CdnService.prototype.update = function () {
-    //TODO
-  };
-
-  CdnService.prototype._serve = function (request, response) {
-    request.addListener('end', this.ns.serve.bind(this.ns, request, response)).resume();
-  };
-
-  CdnService.prototype.restart = function (port) {
-    this.stop(this.start.bind(this, port));
-  };
-
-  CdnService.prototype.start = function (port, defer) {
-    //TODO: what about certificate paths and so on ....
-    if (!defer) defer = Q.defer();
-    if (this.ns) throw Error('Already running?');
-    var proto = this.state.get('protocol');
-    if (proto !== 'http' && this.proto !== 'htts') throw Error('Invalid protocol '+proto);
-    this.log('Time to start listening: ',port, proto, 'caching interval:', this.state.get('cache'));
-    this.ns = new StaticServer.Server(this._serverMonitorPath, {cache:this.state.get('cache')});
-    this.server = require(proto).createServer(this._serve.bind(this));
-    this.server.on ('error', this._onServerError.bind(this, defer));
-    this.server.listen({port:port}, this._onListening.bind(this, port, defer));
-  };
-
-  CdnService.prototype._onListening = function (port,defer) {
-    this.state.set('port', port);
-    defer.resolve();
-  };
-
-  CdnService.prototype._onError = function (err) {
-    if (err instanceof Error) {
-      this.log('An error occured',err.message, err.stack);
-    }else{
-      this.log('An error occured',err);
-    }
-    this.stop();
-  };
-
-  CdnService.prototype._onServerError = function (defer,err) {
-    Node.error('A server error occured: ', err);
-    this.state.remove('port');
-    defer.reject(err);
-  };
-
-  CdnService.prototype.stop = function (donecb) {
-    if (this.server) {
-      this.server.close(donecb);
-      this.server = null;
-    }
-    //is this sufficient?
-    this.ns = null;
+  CdnService.prototype._onError = function () {
+    Array.prototype.unshift.call(arguments, 'Error:');
+    this.log.apply(this, arguments);
   };
 
   CdnService.prototype.log = function () {
@@ -341,9 +302,6 @@ function createCdnService(execlib,ParentServicePack){
   };
   
   return CdnService;
-  }catch (e) {
-    console.log('FAAAAAAAAAAAAAAAAAAAAAIL ', e.message, e.stack);
-  }
 }
 
 module.exports = createCdnService;
