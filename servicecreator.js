@@ -81,6 +81,7 @@ function createCdnService(execlib,ParentServicePack){
         Git.clone.bind(Git,this.state.get('repo'), this.path, null),
         Git.setBranch.bind(Git,this.state.get('branch'), this.path, null),
         this._readLastCommitID.bind(this),
+        this._readEntryPoint.bind(this),
         this._generatePb.bind(this),
         this._finished.bind(this)
       ].reduce (this._reduction.bind(this), Q(null));
@@ -94,6 +95,38 @@ function createCdnService(execlib,ParentServicePack){
 
   CdnService.prototype._reduction = function (soFar, f, index) {
     return soFar.then(f, this._onError.bind(this));
+  };
+
+  CdnService.prototype._onEPSink = function (defer, sinkinfo) {
+    try {
+      console.log('==================>>>', sinkinfo);
+      ///ako to ne treba nista vise od njega sem adrese sinkinfo.sink.destroy()
+    }catch(e) {
+      console.log('PROBLEEEEEMIIIII ...', e.message, e.stack);
+    }
+  };
+
+  CdnService.prototype._readEntryPoint = function () {
+    try {
+      var d = Q.defer();
+      Taskregistry.run('findAndRun', {
+        program: {
+          sinkname: 'EntryPoint',
+          identity: {name:'user', role:'user'},
+          task: {
+            name: this._onEPSink.bind(this, d),
+            propertyhash: {
+              ipaddress:'fill yourself',
+              wsport:'fill yourself'
+            }
+          }
+        }
+      });
+      return d.promise;
+    }
+    catch (e) {
+      console.log('PROBLEEEEEMIIIII ...', e.message, e.stack);
+    }
   };
 
 
