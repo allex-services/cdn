@@ -1,8 +1,7 @@
 ///TODO: think about it: how to serve multiple web app suites using root dir ...
 ///TODO: think about sniffing interval reconfiguration ...
 
-var StaticServer = require('node-static'),
-  Toolbox = require('allex-toolbox'),
+var Toolbox = require('allex-toolbox'),
   ChildProcess = require('child_process'),
   Webalizer = Toolbox.webalizer,
   Node = Toolbox.node,
@@ -97,36 +96,42 @@ function createCdnService(execlib,ParentServicePack){
     return soFar.then(f, this._onError.bind(this));
   };
 
+  CdnService.prototype._onGotPort = function (address, defer, port){
+    Fs.writeJsonSync(Path.resolve(this.path, 'connection_setup.json'), {
+      ipaddress: address,
+      httpport: port
+    });
+    defer.resolve(); ///ok, sho must go on ...
+  };
+
   CdnService.prototype._onEPSink = function (defer, sinkinfo) {
-    try {
-      console.log('==================>>>', sinkinfo);
-      ///ako to ne treba nista vise od njega sem adrese sinkinfo.sink.destroy()
-    }catch(e) {
-      console.log('PROBLEEEEEMIIIII ...', e.message, e.stack);
+    if (!sinkinfo.sink){
+      return;
     }
+    console.log('Got new EntryPoint data, address %s httpport %d', sinkinfo.ipaddress, sinkinfo.httpport);
+    Taskregistry.run ('readState', {
+      state:Taskregistry.run('materializeState', {sink:sinkinfo.sink}),
+      name:'port',
+      cb : this._onGotPort.bind(this, sinkinfo.ipaddress, defer)
+    });
   };
 
   CdnService.prototype._readEntryPoint = function () {
-    try {
-      var d = Q.defer();
-      Taskregistry.run('findAndRun', {
-        program: {
-          sinkname: 'EntryPoint',
-          identity: {name:'user', role:'user'},
-          task: {
-            name: this._onEPSink.bind(this, d),
-            propertyhash: {
-              ipaddress:'fill yourself',
-              wsport:'fill yourself'
-            }
+    var d = Q.defer();
+    Taskregistry.run('findAndRun', {
+      program: {
+        sinkname: 'EntryPoint',
+        identity: {name:'user', role:'user'},
+        task: {
+          name: this._onEPSink.bind(this, d),
+          propertyhash: {
+            ipaddress:'fill yourself',
+            httpport:'fill yourself'
           }
         }
-      });
-      return d.promise;
-    }
-    catch (e) {
-      console.log('PROBLEEEEEMIIIII ...', e.message, e.stack);
-    }
+      }
+    });
+    return d.promise;
   };
 
 
@@ -241,9 +246,15 @@ function createCdnService(execlib,ParentServicePack){
     d.promise.then(this.log_s.bind(this, 'Allex webapp '+app_path+' built successfully'), this._pbFaild.bind(this, app_path, appname));
 
     var is_repo = this.state.get('repo');
-    var command = is_repo ? 
-      'rm -rf '+phase_path+' && allex-webapp-build && mv _generated '+phase_path+' && ln -fs '+phase_path+' _monitor':
-      'allex-webapp-build';
+    var command = '';
+    if (is_repo) {
+      if (Fs.dirExists(Path.resolve(app_path, phase_path))){
+        command += ('rm -rf '+phase_path+' && ');
+      }
+      command+='echo `pwd` && allex-webapp-build && mv _generated '+phase_path+' && ln -fs '+phase_path+' _monitor';
+    }else{
+      command = 'allex-webapp-build';
+    }
 
     this.apps[appname] = {
       generated: Path.resolve(app_path, is_repo ? '_monitor' : '_generated'),
@@ -307,19 +318,9 @@ function createCdnService(execlib,ParentServicePack){
     defer.resolve();
   };
 
-  CdnService.prototype._pbFaild = function (app_path, appname) {
-    //TODO
-    console.log('FAAAAAAAAAAAAAAAAAAAAAAIL ...', arguments)
-    /*
-    try {
-      var missing = Webalizer.tools.getMissingComponents(this.cwd);
-      this.state.set('missing', missing.join(','));
-      Node.error('Missing components '+this.state.get('missing')+'. Will wait for them ...');
-    }catch (e) {
-      Node.error('Fatal error, unable to move on: ', e.message, e.stack);
-      //TODO: e, a sta sad tacno???
-    }
-    */
+  CdnService.prototype._pbFaild = function (app_path, appname, err) {
+    console.trace();
+    console.log('Application %s failed on %s, due to %s', appname, app_path, err.error.message, err.stdout);
   };
 
   CdnService.prototype._onError = function () {
