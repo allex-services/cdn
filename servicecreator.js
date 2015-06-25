@@ -199,6 +199,10 @@ function createCdnService(execlib,ParentServicePack){
     if (Fs.dirExists(web_c)) {
       data.web_component = web_c;
     }
+
+    ///TODO
+    ///THIS IS HUGE MISTAKE !!!! now services are allowed not to have web_component dir ...
+    ///consider refering or so for known modules on allex-webapp-build
     this.modules[name] = data;
     if (data.web_component) {
       data.promise = Node.executeCommand('allex-component-build', null, {cwd: web_c}, true);
