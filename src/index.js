@@ -208,6 +208,7 @@ WebAppSuiteBuilder.prototype._buildingDone = function (results) {
   Node.info('Apps building done ...');
   results.forEach(this._analyzeAppBuildingResults.bind(this));
   var _apps_dir = Path.join(this.path, '_apps');
+
   if (!Fs.dirExists(_apps_dir)) {
     Fs.mkdirSync(_apps_dir);
   }
@@ -217,14 +218,14 @@ WebAppSuiteBuilder.prototype._buildingDone = function (results) {
 };
 
 WebAppSuiteBuilder.prototype._linkApps = function (apps_dir, app) {
-  var l = Path.join(app_dir, app);
+  var l = Path.join(apps_dir, app);
   if (Fs.existsSync(l)) {
     var stat = Fs.statSync(l);
     if (!stat.isSymbolicLink()) throw new Error ('This should never happen ... Not a symlink?');
     if (!Fs.existsSync(Fs.readlinkSync(l))) Fs.removeSync(l);
   }
-  if (!Fs.existsSync){ ///could be removed a line earlier before ...
-    Fs.symlinkSync(Path.join(this.path, app, '_monitor'), Path.join(apps_dir, app));
+  if (!Fs.existsSync(l)){ ///could be removed a line earlier before ...
+    Fs.symlinkSync(Path.join(this.path, app, '_app'), Path.join(apps_dir, app));
   }
 };
 
@@ -234,7 +235,6 @@ WebAppSuiteBuilder.prototype._analyzeAppBuildingResults = function (rec) {
 };
 
 WebAppSuiteBuilder.prototype._do_build = function (promisses, instance, name) {
-  ///TODO: STIGAO SI DO OVDE: fali ti uslovni rm _monitor && mv _generated _stage_num && ln -s _stage_num _monitor
   Node.info('App ', name, 'building started');
   var app_dir = Path.resolve(this.path, name),
     commands = ['allex-webapp-build'],
@@ -246,8 +246,7 @@ WebAppSuiteBuilder.prototype._do_build = function (promisses, instance, name) {
     commands.push('rm _app');
   }
   commands.push('ln -s '+phase_dir+' _app');
-  //promisses.push (Node.executeCommand(commands.join(' && '), null, {cwd:app_dir}));
-  console.log('STA CU SAD DA RADIM ',commands.join(' && '), this.phase, phase_dir);
+  promisses.push (Node.executeCommand(commands.join(' && '), null, {cwd:app_dir}));
 };
 
 function build_component (path) {
