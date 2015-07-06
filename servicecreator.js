@@ -32,6 +32,7 @@ function createCdnService(execlib,ParentServicePack){
 
  
   function CdnService(prophash){
+    console.log('CdnService!',this);
     ParentService.call(this,prophash);
     this.path = Path.resolve(prophash.path);
 
