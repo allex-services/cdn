@@ -39,7 +39,7 @@ function createCdnService(execlib,ParentServicePack){
     this.state.set('branch', prophash.branch || DEFAULT_BRANCH);
     this.state.set('root', null);
 
-    this._phase = 0;
+    this._phase = null;
     this._building = false;
     this._rebuild = false;
     this.modules = {};
@@ -150,11 +150,10 @@ function createCdnService(execlib,ParentServicePack){
       return;
     }
     this._phase = (this._phase+1)%2;
-    this._building = new WebAppSuiteBuilder(this.path, this.connection_data, this._phase);
+    this._building = new WebAppSuiteBuilder(this.path, this.connection_data, this.state.get('repo') ? this._phase : null);
     this._rebuild = false;
 
     if (this.state.get('repo')) {
-
       console.log('Got repo record, will try to download project :', this.state.get('repo'));
       Fs.removeSync(this.path);
       Heleprs.QReduce([
@@ -172,14 +171,14 @@ function createCdnService(execlib,ParentServicePack){
   };
 
   CdnService.prototype._finalize = function () {
+    //TODO: check if everything is successfully destroyed
     var d = Q.defer();
-    Node.info ('Sad je vreme da se _building unisti ...');
     this._building.destroy();
-    console.log('samo da proverim da li sam sve unistio za sobom? ', this._building);
     this._building = null;
     if (this._rebuild) {
       Lib.runNext (this._downloadAndPrepare.bind(this), 1);
     }
+    d.resolve();
     return d.promise;
   };
 
