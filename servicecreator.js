@@ -35,8 +35,9 @@ function createCdnService(execlib,ParentServicePack){
     console.log('CdnService!',this);
     ParentService.call(this,prophash);
     this.path = Path.resolve(prophash.path);
+    if (!prophash.repo) throw new Error('No repo? What should I do?');
 
-    this.state.set('repo', prophash.repo || null);
+    this.state.set('repo', prophash.repo);
     this.state.set('branch', prophash.branch || DEFAULT_BRANCH);
     this.state.set('root', null);
 
@@ -106,6 +107,7 @@ function createCdnService(execlib,ParentServicePack){
 
   CdnService.prototype._readEntryPoint = function () {
     var d = Q.defer();
+    console.log('Will read EntryPoint ...');
     Taskregistry.run('findAndRun', {
       program: {
         sinkname: 'EntryPoint',
@@ -150,11 +152,13 @@ function createCdnService(execlib,ParentServicePack){
       this._rebuild = true;
       return;
     }
+
     this._phase = (this._phase+1)%2;
     this._building = new WebAppSuiteBuilder(this.path, this.connection_data, this.state.get('repo') ? this._phase : null);
     this._rebuild = false;
 
     if (this.state.get('repo')) {
+      if (Fs.existsSync('node_modules')) Fs.removeSync('node_modules');
       console.log('Got repo record, will try to download project :', this.state.get('repo'));
       Fs.removeSync(this.path);
       Heleprs.QReduce([
