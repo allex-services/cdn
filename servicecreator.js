@@ -8,8 +8,7 @@ var Toolbox = require('allex-toolbox'),
   Node = Toolbox.node,
   Watcher = require('node-watch'),
   Heleprs = Toolbox.helpers,
-  Path = require('path'),
-  WebAppSuiteBuilder = require('./src/');
+  Path = require('path');
 
 function createCdnService(execlib,ParentServicePack){
   var ParentService = ParentServicePack.Service,
@@ -154,7 +153,7 @@ function createCdnService(execlib,ParentServicePack){
     }
 
     this._phase = (this._phase+1)%2;
-    this._building = new WebAppSuiteBuilder(this.path, this.connection_data, this.state.get('repo') ? this._phase : null);
+    this._building = true;
     this._rebuild = false;
 
     if (this.state.get('repo')) {
@@ -164,12 +163,12 @@ function createCdnService(execlib,ParentServicePack){
       Heleprs.QReduce([
         Git.clone.bind(Git, this.state.get('repo'), this.path, null),
         Git.setBranch.bind(Git, this.state.get('branch'), this.path, null),
-        this._building.go.bind(this._building),
+        Node.executeCommand.bind(Node, 'allex-webapp-build -p '+this._phase+' -c \''+JSON.stringify(this.connection_data)+"'", null, {cwd: this.path}, true),
         this._finalize.bind(this)
       ]);
     }else{
       Heleprs.QReduce([
-        this._building.go.bind(this._building),
+        Node.executeCommand.bind(Node, 'allex-webapp-build', null, {cwd: this.path}, true),
         this._finalize.bind(this)
       ]);
     }
