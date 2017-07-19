@@ -1,6 +1,6 @@
 {
   "name": "allex_cdnservice",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "CdnService",
   "main": "index.js",
   "scripts": {
@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git@gitlab.hers.rs:allex_services/cdn.git"
+    "url": "git@github.com:allex-services/cdn.git"
   },
   "keywords": [
     "ecosystem:allex",
